@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Daily news digest — fetches headlines from RSS feeds and sends a Gmail."""
+"""Daily news digest — fetches headlines from RSS feeds and sends via Resend."""
 
 import os
-import smtplib
+import json
+import urllib.request
 import feedparser
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 FEEDS = {
     "The Verge":        "https://www.theverge.com/rss/index.xml",
@@ -103,21 +102,29 @@ def build_plaintext(digest, date_str):
 
 
 def send_email(html_content, plain_content, date_str):
-    sender    = os.environ["GMAIL_ADDRESS"]
-    password  = os.environ["GMAIL_APP_PASSWORD"]
-    recipient = os.environ.get("RECIPIENT_EMAIL", sender)
+    api_key   = os.environ["RESEND_API_KEY"]
+    recipient = os.environ["RECIPIENT_EMAIL"]
+    from_addr = os.environ.get("FROM_EMAIL", "Daily Digest <onboarding@resend.dev>")
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Daily Digest — {date_str}"
-    msg["From"]    = sender
-    msg["To"]      = recipient
-    msg.attach(MIMEText(plain_content, "plain"))
-    msg.attach(MIMEText(html_content,  "html"))   # clients prefer HTML when both present
+    payload = json.dumps({
+        "from":    from_addr,
+        "to":      [recipient],
+        "subject": f"Daily Digest — {date_str}",
+        "html":    html_content,
+        "text":    plain_content,
+    }).encode("utf-8")
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender, password)
-        server.sendmail(sender, recipient, msg.as_string())
-    print(f"Email sent to {recipient}")
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req) as res:
+        print(f"Email sent → {recipient} (status {res.status})")
 
 
 def main():
