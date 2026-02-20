@@ -123,8 +123,13 @@ def send_email(html_content, plain_content, date_str):
         },
         method="POST",
     )
-    with urllib.request.urlopen(req) as res:
-        print(f"Email sent → {recipient} (status {res.status})")
+    try:
+        with urllib.request.urlopen(req) as res:
+            print(f"Email sent → {recipient} (status {res.status})")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8")
+        print(f"Resend error {e.code}: {body}")
+        raise
 
 
 def main():
