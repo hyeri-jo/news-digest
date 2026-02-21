@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Daily news digest — fetches headlines from RSS feeds and sends to Slack."""
+"""Daily news digest — clusters top stories with Claude, sends to Slack."""
 
 import os
 import json
 import urllib.request
 import feedparser
+import anthropic
 from datetime import datetime, timedelta, timezone
 
 FEEDS = {
@@ -22,8 +23,8 @@ FEEDS = {
     "Google Trends":    "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US",
 }
 
-MAX_ARTICLES = 10   # per source
-HOURS_LOOKBACK = 24 # only show articles from the last 24 hours
+MAX_ARTICLES = 10
+HOURS_LOOKBACK = 24
 
 
 def fetch_feed(name, url):
@@ -49,8 +50,86 @@ def fetch_feed(name, url):
         return []
 
 
-def post_to_slack(webhook_url, payload):
-    data = json.dumps(payload).encode("utf-8")
+def cluster_articles(digest):
+    """Use Claude to find top 5 cross-source story clusters with summaries."""
+    # Flatten all articles with a numeric index
+    all_articles = []
+    for source, articles in digest.items():
+        for a in articles:
+            all_articles.append({
+                "idx":    len(all_articles),
+                "source": source,
+                "title":  a["title"],
+                "link":   a["link"],
+            })
+
+    if not all_articles:
+        return [], {s: v for s, v in digest.items()}
+
+    article_list = "\n".join(
+        f"[{a['idx']}] {a['source']}: {a['title']}"
+        for a in all_articles
+    )
+
+    prompt = f"""Here are {len(all_articles)} news articles from various sources published today:
+
+{article_list}
+
+Identify the top 5 news stories covered by MULTIPLE sources (same event or topic in 2+ sources).
+For each cluster:
+- Write a 2-3 sentence neutral summary in Korean (한국어로)
+- List the article indices that belong to this cluster
+
+Return ONLY valid JSON, no extra text:
+{{
+  "clusters": [
+    {{
+      "topic": "간단한 토픽 제목 (한국어)",
+      "summary": "2-3문장 요약.",
+      "indices": [0, 3, 7]
+    }}
+  ]
+}}
+
+Order by number of sources covering the story (most first). Only include stories with 2+ sources."""
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    raw = response.content[0].text.strip()
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    clusters = json.loads(raw).get("clusters", [])[:5]
+
+    # Enrich clusters with source names and links
+    clustered_indices = set()
+    for cluster in clusters:
+        indices = cluster.get("indices", [])
+        cluster["sources"] = list({all_articles[i]["source"] for i in indices if i < len(all_articles)})
+        cluster["articles"] = [
+            {"title": all_articles[i]["title"], "link": all_articles[i]["link"]}
+            for i in indices if i < len(all_articles)
+        ]
+        clustered_indices.update(indices)
+
+    # Build remaining (non-clustered) articles per source
+    remaining = {source: [] for source in digest}
+    for a in all_articles:
+        if a["idx"] not in clustered_indices:
+            remaining[a["source"]].append({"title": a["title"], "link": a["link"]})
+
+    return clusters, remaining
+
+
+def post_to_slack(webhook_url, text):
+    data = json.dumps({"text": text}).encode("utf-8")
     req = urllib.request.Request(
         webhook_url,
         data=data,
@@ -61,35 +140,50 @@ def post_to_slack(webhook_url, payload):
         return res.status
 
 
-def send_slack(digest, date_str):
+def send_slack(digest, clusters, remaining, date_str):
     webhook_url = os.environ["SLACK_WEBHOOK_URL"]
     total = sum(len(v) for v in digest.values())
 
-    # Header message
-    post_to_slack(webhook_url, {
-        "text": f"*Daily News Digest — {date_str}*  |  {total} articles · {len(digest)} sources"
-    })
+    # Header
+    post_to_slack(webhook_url, f"*📰 Daily News Digest — {date_str}*  |  {total}개 기사 · {len(digest)}개 매체")
 
-    # One message per source
-    for source, articles in digest.items():
+    # Top stories clusters
+    if clusters:
+        post_to_slack(webhook_url, "━━━━━━━━━━━━━━━━━━━━\n*📌 Top Stories*")
+        for i, cluster in enumerate(clusters, 1):
+            sources_str = " · ".join(cluster["sources"])
+            lines = [
+                f"*{i}. {cluster['topic']}*",
+                cluster["summary"],
+                f"_({sources_str})_",
+            ]
+            post_to_slack(webhook_url, "\n".join(lines))
+
+    # Remaining articles by source
+    post_to_slack(webhook_url, "━━━━━━━━━━━━━━━━━━━━\n*📂 매체별 기사*")
+    for source, articles in remaining.items():
         if not articles:
             continue
         lines = [f"*{source}*"]
         for a in articles:
             lines.append(f"• <{a['link']}|{a['title']}>")
-        post_to_slack(webhook_url, {"text": "\n".join(lines)})
+        post_to_slack(webhook_url, "\n".join(lines))
 
-    print(f"Slack digest sent ({total} articles)")
+    print(f"Slack digest sent — {len(clusters)} clusters, {total} total articles")
 
 
 def main():
     date_str = datetime.now().strftime("%B %d, %Y")
+
     digest = {}
     for name, url in FEEDS.items():
         print(f"Fetching {name}...")
         digest[name] = fetch_feed(name, url)
 
-    send_slack(digest, date_str)
+    print("Clustering with Claude...")
+    clusters, remaining = cluster_articles(digest)
+
+    send_slack(digest, clusters, remaining, date_str)
 
 
 if __name__ == "__main__":
