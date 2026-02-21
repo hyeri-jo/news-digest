@@ -23,5 +23,4 @@ jobs:
       - name: Fetch feeds and send email
         run: python fetch_digest.py
         env:
-          RESEND_API_KEY:  ${{ secrets.RESEND_API_KEY }}
-          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
