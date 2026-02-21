@@ -19,8 +19,7 @@ FEEDS = {
     "Forbes":           "https://www.forbes.com/innovation/feed2/",
     "New York Times":   "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
     "WSJ":              "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",
-    "TradedVC":         "https://www.tradedvc.com/rss.xml",
-    "Google Trends":    "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US",
+    "Google Trends":    "https://trends.google.com/trending/rss?geo=US",
 }
 
 MAX_ARTICLES = 10

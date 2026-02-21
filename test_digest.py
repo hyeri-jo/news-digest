@@ -90,7 +90,7 @@ class TestFeeds(unittest.TestCase):
         expected = [
             "The Verge", "TechCrunch", "Wired", "404 Media", "Bloomberg",
             "Business Insider", "Fortune", "Forbes",
-            "New York Times", "WSJ", "TradedVC", "Google Trends",
+            "New York Times", "WSJ", "Google Trends",
         ]
         for name in expected:
             self.assertIn(name, FEEDS, f"FEEDS에 '{name}' 없음")
