@@ -151,11 +151,14 @@ def send_slack(digest, clusters, remaining, date_str):
     if clusters:
         post_to_slack(webhook_url, "━━━━━━━━━━━━━━━━━━━━\n*📌 Top Stories*")
         for i, cluster in enumerate(clusters, 1):
-            sources_str = " · ".join(cluster["sources"])
+            links_str = "  ".join(
+                f"<{a['link']}|{src}>"
+                for src, a in zip(cluster["sources"], cluster["articles"])
+            )
             lines = [
                 f"*{i}. {cluster['topic']}*",
                 cluster["summary"],
-                f"_({sources_str})_",
+                f"↗ {links_str}",
             ]
             post_to_slack(webhook_url, "\n".join(lines))
 
